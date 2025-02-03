@@ -22,15 +22,17 @@ void Global_Planner::init(ros::NodeHandle& nh){
                 ("/mavros/local_position/odom", 10, &Local_Planner::odometryCallback, this);
     // 订阅 目标点
     goal_sub = nh.subscribe<geometry_msgs::PoseStamped>
-            ("/prometheus/planning/goal", 1, &Global_Planner::goal_cb, this);
+            ("/planner/goal", 1, &Global_Planner::goal_cb, this);
     // 地图更新
-    Gpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>
-            ("/prometheus/global_planning/global_pcl", 10, &Global_Planner::Gpointcloud_cb, this);
+    Lpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>
+            ("/livox/lidar", 10, &Global_Planner::Lpointcloud_cb, this);
 
-    // 发布 路径指令
-    command_pub = nh.advertise<prometheus_msgs::ControlCommand>("/prometheus/control_command", 10);
+    //　【发布】控制指令
+    easondrone_ctrl_pub = nh.advertise<easondrone_msgs::ControlCommand>
+            ("/easondrone/control_command", 10);
     // 发布路径用于显示
-    path_cmd_pub   = nh.advertise<nav_msgs::Path>("/prometheus/global_planning/path_cmd",  10);
+    path_cmd_pub = nh.advertise<nav_msgs::Path>
+            ("/hybrid_astar_search/path_cmd",  10);
 
     // 设置cout的精度为小数点后两位
     std::cout << std::fixed << std::setprecision(4);
@@ -46,12 +48,16 @@ void Global_Planner::init(ros::NodeHandle& nh){
     is_safety = true;
     is_new_path = false;
 
-    // 初始化发布的指令
-    Command_Now.header.stamp = ros::Time::now();
-    Command_Now.Mode  = prometheus_msgs::ControlCommand::Idle;
-    Command_Now.Command_ID = 0;
-    Command_Now.source = NODE_NAME;
-    desired_yaw = 0.0;
+    // 初始化命令
+    ctrl_cmd_out_.header.stamp = ros::Time::now();
+    ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
+    ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;
+    ctrl_cmd_out_.poscmd.position.x = 0;
+    ctrl_cmd_out_.poscmd.position.y = 0;
+    ctrl_cmd_out_.poscmd.position.z = 0;
+    ctrl_cmd_out_.poscmd.yaw = 0;
+
+    ros::spin();
 }
 
 // 保存无人机当前里程计信息，包括位置、速度和姿态
@@ -99,13 +105,13 @@ void Global_Planner::goal_cb(const geometry_msgs::PoseStampedConstPtr& msg){
     goal_ready = true;
 }
 
-// 根据全局点云更新地图
-// 情况：已知全局点云的场景、由SLAM实时获取的全局点云
-void Global_Planner::Gpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg){
-        // 对Astar中的地图进行更新
-        Astar_ptr->Occupy_map_ptr->map_update_gpcl(msg);
-        // 并对地图进行膨胀
-        Astar_ptr->Occupy_map_ptr->inflate_point_cloud();
+// 根据局部点云更新地图
+// 情况：RGBD相机、三维激光雷达
+void Global_Planner::Lpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg){
+    // 对Astar中的地图进行更新（局部地图+odom）
+    Astar_ptr->Occupy_map_ptr->map_update_lpcl(msg, odom_pos_, odom_roll_, odom_pitch_, odom_yaw_);
+    // 并对地图进行膨胀
+    Astar_ptr->Occupy_map_ptr->inflate_point_cloud(); 
 }
 
 void Global_Planner::track_path_cb(const ros::TimerEvent& e){
@@ -126,18 +132,18 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
 
     // 抵达终点
     if(cur_id >= Num_total_wp - 1){
-        Command_Now.header.stamp = ros::Time::now();
-        Command_Now.Mode                                = prometheus_msgs::ControlCommand::Move;
-        Command_Now.Command_ID                          = Command_Now.Command_ID + 1;
-        Command_Now.source = NODE_NAME;
-        Command_Now.Reference_State.Move_mode           = prometheus_msgs::PositionReference::XYZ_POS;
-        Command_Now.Reference_State.Move_frame          = prometheus_msgs::PositionReference::ENU_FRAME;
-        Command_Now.Reference_State.position_ref[0]     = goal_pos[0];
-        Command_Now.Reference_State.position_ref[1]     = goal_pos[1];
-        Command_Now.Reference_State.position_ref[2]     = goal_pos[2];
-        Command_Now.Reference_State.yaw_ref             = desired_yaw;
+        ctrl_cmd_out_.header.stamp = ros::Time::now();
+        ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
+        ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;
+        ctrl_cmd_out_.poscmd.position.x = goal_pos[0];
+        ctrl_cmd_out_.poscmd.position.y = goal_pos[1];
+        ctrl_cmd_out_.poscmd.position.z = goal_pos[2];
+        ctrl_cmd_out_.poscmd.velocity.x = 0;
+        ctrl_cmd_out_.poscmd.velocity.y = 0;
+        ctrl_cmd_out_.poscmd.velocity.z = 0;
+        ctrl_cmd_out_.poscmd.yaw = desired_yaw;
 
-        command_pub.publish(Command_Now);
+        easondrone_ctrl_pub.publish(ctrl_cmd_out_);
 
         cout << "[planner] Reach the goal!" << endl;
         
@@ -182,21 +188,18 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
         velocity_z = limit_velocity_z;
     }
 
-    Command_Now.header.stamp = ros::Time::now();
-    Command_Now.Mode                                = prometheus_msgs::ControlCommand::Move;
-    Command_Now.Command_ID                          = Command_Now.Command_ID + 1;
-    Command_Now.source = NODE_NAME;
-    Command_Now.Reference_State.Move_mode           = prometheus_msgs::PositionReference::TRAJECTORY;
-    Command_Now.Reference_State.Move_frame          = prometheus_msgs::PositionReference::ENU_FRAME;
-    Command_Now.Reference_State.position_ref[0]     = path_cmd.poses[i].pose.position.x;
-    Command_Now.Reference_State.position_ref[1]     = path_cmd.poses[i].pose.position.y;
-    Command_Now.Reference_State.position_ref[2]     = path_cmd.poses[i].pose.position.z;
-    Command_Now.Reference_State.velocity_ref[0]     = velocity_x;
-    Command_Now.Reference_State.velocity_ref[1]     = velocity_y;
-    Command_Now.Reference_State.velocity_ref[2]     = velocity_z;
-    Command_Now.Reference_State.yaw_ref             = desired_yaw;
-    
-    command_pub.publish(Command_Now);
+    ctrl_cmd_out_.header.stamp = ros::Time::now();
+    ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
+    ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;
+    ctrl_cmd_out_.poscmd.position.x = path_cmd.poses[i].pose.position.x;
+    ctrl_cmd_out_.poscmd.position.y = path_cmd.poses[i].pose.position.x;
+    ctrl_cmd_out_.poscmd.position.z = path_cmd.poses[i].pose.position.z;
+    ctrl_cmd_out_.poscmd.velocity.x = velocity_x;
+    ctrl_cmd_out_.poscmd.velocity.y = velocity_y;
+    ctrl_cmd_out_.poscmd.velocity.z = velocity_z;
+    ctrl_cmd_out_.poscmd.yaw = desired_yaw;
+
+    easondrone_ctrl_pub.publish(ctrl_cmd_out_);
 
     cout << velocity_x << " " << velocity_y << " " << velocity_z << endl;
 
@@ -232,14 +235,22 @@ void Global_Planner::mainloop_cb(const ros::TimerEvent& e)
                 path_ok = false;
                 exec_state = EXEC_STATE::WAIT_GOAL;
 
-                     Command_Now.header.stamp = ros::Time::now();
-                     Command_Now.Mode         = prometheus_msgs::ControlCommand::Hold;
-                     Command_Now.Command_ID   = Command_Now.Command_ID + 1;
-                     Command_Now.source = NODE_NAME;
-                     command_pub.publish(Command_Now);
+                ctrl_cmd_out_.header.stamp = ros::Time::now();
+                ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
+                ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;
+                ctrl_cmd_out_.poscmd.position.x = odom_pos_[0];
+                ctrl_cmd_out_.poscmd.position.y = odom_pos_[1];
+                ctrl_cmd_out_.poscmd.position.z = odom_pos_[2];
+                ctrl_cmd_out_.poscmd.velocity.x = 0;
+                ctrl_cmd_out_.poscmd.velocity.y = 0;
+                ctrl_cmd_out_.poscmd.velocity.z = 0;
+                ctrl_cmd_out_.poscmd.yaw = odom_yaw_;
+
+                easondrone_ctrl_pub.publish(ctrl_cmd_out_);
 
                 cout << "[planner] astar find no path, HOLD" << endl;
-            }else{
+            }
+            else{
                 path_ok = true;
                 is_new_path = true;
                 path_cmd = Astar_ptr->get_ros_path();

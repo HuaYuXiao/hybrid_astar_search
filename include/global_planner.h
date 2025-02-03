@@ -12,9 +12,7 @@
 #include <sensor_msgs/LaserScan.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
-#include "prometheus_msgs/PositionReference.h"
-#include "prometheus_msgs/Message.h"
-#include "prometheus_msgs/ControlCommand.h"
+#include <easondrone_msgs/ControlCommand.h>
 #include "kinodynamic_astar.h"
 #include "occupy_map.h"
 
@@ -46,21 +44,24 @@ private:
     // 调用路径规划算法 生成路径
     // 调用轨迹优化算法 规划轨迹
 
+    ros::Timer mainloop_timer, track_path_timer, safety_timer;
+
     // 订阅无人机状态、目标点、传感器数据（生成地图）
     ros::Subscriber goal_sub;
     // 支持直接输入全局已知点云
-    ros::Subscriber Gpointcloud_sub;
-
-    // 发布控制指令
-    ros::Publisher command_pub,path_cmd_pub;
-    ros::Timer mainloop_timer, track_path_timer, safety_timer;
+    ros::Subscriber Lpointcloud_sub;
 
     // A星规划器
     KinodynamicAstar::Ptr Astar_ptr;
 
     nav_msgs::Path path_cmd;
+    ros::Publisher path_cmd_pub;
     double distance_walked;
-    prometheus_msgs::ControlCommand Command_Now;   
+
+    // 无人机当前执行命令
+    easondrone_msgs::ControlCommand ctrl_cmd_out_;
+    // 发布控制指令
+    ros::Publisher easondrone_ctrl_pub;
 
     double distance_to_goal;
 
@@ -92,8 +93,7 @@ private:
     // 回调函数
     void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
     void goal_cb(const geometry_msgs::PoseStampedConstPtr& msg);
-    void drone_state_cb(const prometheus_msgs::DroneStateConstPtr &msg);
-    void Gpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg);
+    void Lpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg);
 
     void safety_cb(const ros::TimerEvent& e);
     void mainloop_cb(const ros::TimerEvent& e);
