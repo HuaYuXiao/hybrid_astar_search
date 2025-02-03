@@ -8,22 +8,18 @@
 #include <unordered_map>
 #include <boost/functional/hash.hpp>
 #include <queue>
+#include <vector>
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Path.h>
 #include "occupy_map.h"
-#include "message_utils.h"
 
-#define NODE_NAME "Global_Planner [Hybrid Astar]"
-
-namespace Global_Planning
-{
+namespace hybrid_astar_search{
 #define IN_CLOSE_SET 'a'
 #define IN_OPEN_SET 'b'
 #define NOT_EXPAND 'c'
 #define inf 1 >> 30
 
-class PathNode
-{
+class PathNode{
 public:
   /* -------------------- */
   Eigen::Vector3i index;
@@ -38,8 +34,7 @@ public:
   char node_state;
 
   /* -------------------- */
-  PathNode()
-  {
+  PathNode(){
     parent = NULL;
     node_state = NOT_EXPAND;
   }
@@ -47,24 +42,18 @@ public:
 };
 typedef PathNode* PathNodePtr;
 
-
-class NodeComparator
-{
+class NodeComparator{
 public:
-  bool operator()(PathNodePtr node1, PathNodePtr node2) 
-  { 
+  bool operator()(PathNodePtr node1, PathNodePtr node2) { 
     return node1->f_score > node2->f_score; 
   }
 };
 
 template <typename T>
-struct matrix_hash : std::unary_function<T, size_t>
-{
-  std::size_t operator()(T const& matrix) const
-  {
+struct matrix_hash : std::unary_function<T, size_t>{
+  std::size_t operator()(T const& matrix) const{
     size_t seed = 0;
-    for (size_t i = 0; i < matrix.size(); ++i)
-    {
+    for (size_t i = 0; i < matrix.size(); ++i){
       auto elem = *(matrix.data() + i);
       seed ^= std::hash<typename T::Scalar>()(elem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
     }
@@ -72,8 +61,7 @@ struct matrix_hash : std::unary_function<T, size_t>
   }
 };
 
-class NodeHashTable
-{
+class NodeHashTable{
 private:
   /* data */
   std::unordered_map<Eigen::Vector3i, PathNodePtr, matrix_hash<Eigen::Vector3i>> data_3d_;
@@ -82,32 +70,32 @@ private:
 public:
   NodeHashTable(/* args */) {}
   ~NodeHashTable() {}
-  void insert(Eigen::Vector3i idx, PathNodePtr node) { data_3d_.insert(make_pair(idx, node)); }
-  void insert(Eigen::Vector3i idx, int time_idx, PathNodePtr node)
-  {
-    data_4d_.insert(make_pair(Eigen::Vector4i(idx(0), idx(1), idx(2), time_idx), node));
+
+  void insert(Eigen::Vector3i idx, PathNodePtr node) { 
+    data_3d_.insert(std::make_pair(idx, node)); 
+    }
+
+  void insert(Eigen::Vector3i idx, int time_idx, PathNodePtr node){
+    data_4d_.insert(std::make_pair(Eigen::Vector4i(idx(0), idx(1), idx(2), time_idx), node));
   }
 
-  PathNodePtr find(Eigen::Vector3i idx)
-  {
+  PathNodePtr find(Eigen::Vector3i idx){
     auto iter = data_3d_.find(idx);
     return iter == data_3d_.end() ? NULL : iter->second;
   }
-  PathNodePtr find(Eigen::Vector3i idx, int time_idx)
-  {
+
+  PathNodePtr find(Eigen::Vector3i idx, int time_idx){
     auto iter = data_4d_.find(Eigen::Vector4i(idx(0), idx(1), idx(2), time_idx));
     return iter == data_4d_.end() ? NULL : iter->second;
   }
 
-  void clear()
-  {
+  void clear(){
     data_3d_.clear();
     data_4d_.clear();
   }
 };
 
-class KinodynamicAstar
-{
+class KinodynamicAstar{
 private:
   // 备选路径点指针容器
   std::vector<PathNodePtr> path_node_pool_;
@@ -173,21 +161,22 @@ private:
   void retrievePath(PathNodePtr end_node);
 
   /* shot trajectory */
-  vector<double> cubic(double a, double b, double c, double d);
-  vector<double> quartic(double a, double b, double c, double d, double e);
+  std::vector<double> cubic(double a, double b, double c, double d);
+  std::vector<double> quartic(double a, double b, double c, double d, double e);
   bool computeShotTraj(Eigen::VectorXd state1, Eigen::VectorXd state2, double time_to_goal);
   double estimateHeuristic(Eigen::VectorXd x1, Eigen::VectorXd x2, double& optimal_time);
 
   /* state propagation */
-  void stateTransit(Eigen::Matrix<double, 6, 1>& state0, Eigen::Matrix<double, 6, 1>& state1,
-                    Eigen::Vector3d um, double tau);
+  void stateTransit(Eigen::Matrix<double, 6, 1>& state0, 
+                    Eigen::Matrix<double, 6, 1>& state1,
+                    Eigen::Vector3d um, 
+                    double tau);
 
 public:
   KinodynamicAstar(){};
   ~KinodynamicAstar();
 
-  enum
-  {
+  enum{
     REACH_HORIZON = 1,
     REACH_END = 2,
     NO_PATH = 3
@@ -214,7 +203,6 @@ public:
 
   typedef std::shared_ptr<KinodynamicAstar> Ptr;
 };
-
 } 
 
 #endif

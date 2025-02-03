@@ -5,11 +5,8 @@
 #include <Eigen/Eigen>
 #include <iostream>
 #include <algorithm>
-#include <iostream>
 #include <geometry_msgs/PoseStamped.h>
-#include <std_msgs/Bool.h>
 #include <sensor_msgs/PointCloud2.h>
-#include <sensor_msgs/LaserScan.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <easondrone_msgs/ControlCommand.h>
@@ -20,10 +17,10 @@ using namespace std;
 
 #define MIN_DIS 0.2
 
-namespace Global_Planning{
+namespace hybrid_astar_search{
 class Global_Planner{
 private:
-    ros::NodeHandle global_planner_nh;
+    ros::NodeHandle nh;
 
     // odometry state
     ros::Subscriber odom_sub_;
@@ -38,7 +35,6 @@ private:
     double time_per_path;
     double replan_time;
     bool consider_neighbour;
-    bool map_groundtruth;
 
     // 根据不同的输入（激光雷达输入、相机输入等）生成occupymap
     // 调用路径规划算法 生成路径
@@ -105,7 +101,7 @@ private:
     int get_start_point_id(void);
     
 public:
-    Global_Planner(void): global_planner_nh("~"){}
+    Global_Planner(void): nh("~"){}
     ~Global_Planner(){}
 
     void init(ros::NodeHandle& nh);

@@ -1,14 +1,13 @@
 #include "global_planner.h"
 
-namespace Global_Planning{
+namespace hybrid_astar_search{
 // 初始化函数
 void Global_Planner::init(ros::NodeHandle& nh){
     // 安全距离，若膨胀距离设置已考虑安全距离，建议此处设为0
     nh.param("global_planner/safe_distance", safe_distance, 0.05); 
     nh.param("global_planner/time_per_path", time_per_path, 1.0); 
     // 重规划频率 
-    nh.param("global_planner/replan_time", replan_time, 2.0);
-    nh.param("global_planner/map_groundtruth", map_groundtruth, false); 
+    nh.param("fsm/thresh_replan", replan_time, 2.0);
 
     // 定时器 安全检测
     // safety_timer = nh.createTimer(ros::Duration(2.0), &Global_Planner::safety_cb, this); 
@@ -19,7 +18,7 @@ void Global_Planner::init(ros::NodeHandle& nh){
     track_path_timer = nh.createTimer(ros::Duration(0.2), &Global_Planner::track_path_cb, this);
 
     odom_sub_ = nh.subscribe<nav_msgs::Odometry>
-                ("/mavros/local_position/odom", 10, &Local_Planner::odometryCallback, this);
+                ("/mavros/local_position/odom", 10, &Global_Planner::odometryCallback, this);
     // 订阅 目标点
     goal_sub = nh.subscribe<geometry_msgs::PoseStamped>
             ("/planner/goal", 1, &Global_Planner::goal_cb, this);
@@ -89,12 +88,6 @@ void Global_Planner::odometryCallback(const nav_msgs::Odometry::ConstPtr& msg){
     );
 
     tf::Matrix3x3(odom_q_).getRPY(odom_roll_, odom_pitch_, odom_yaw_);
-
-    if (local_alg_ptr) {
-        local_alg_ptr->set_odom(*msg);
-    } else {
-        ROS_ERROR("local_alg_ptr is nullptr");
-    }
 }
 
 void Global_Planner::goal_cb(const geometry_msgs::PoseStampedConstPtr& msg){
@@ -109,7 +102,11 @@ void Global_Planner::goal_cb(const geometry_msgs::PoseStampedConstPtr& msg){
 // 情况：RGBD相机、三维激光雷达
 void Global_Planner::Lpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg){
     // 对Astar中的地图进行更新（局部地图+odom）
-    Astar_ptr->Occupy_map_ptr->map_update_lpcl(msg, odom_pos_, odom_roll_, odom_pitch_, odom_yaw_);
+    Astar_ptr->Occupy_map_ptr->map_update_lpcl(msg, 
+                                            odom_pos_, 
+                                            odom_roll_, 
+                                            odom_pitch_, 
+                                            odom_yaw_);
     // 并对地图进行膨胀
     Astar_ptr->Occupy_map_ptr->inflate_point_cloud(); 
 }
@@ -130,8 +127,10 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
     // }
     is_new_path = false;
 
+    distance_to_goal = (start_pos - goal_pos).norm();
+
     // 抵达终点
-    if(cur_id >= Num_total_wp - 1){
+    if(distance_to_goal < MIN_DIS){
         ctrl_cmd_out_.header.stamp = ros::Time::now();
         ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
         ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;
@@ -156,7 +155,7 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
 
     int i = cur_id;
 
-    cout << cur_id << "/"<< Num_total_wp<< " Moving to " <<
+    cout << " Moving to " <<
         path_cmd.poses[i].pose.position.x << ", " <<
         path_cmd.poses[i].pose.position.y << ", " <<
         path_cmd.poses[i].pose.position.z << endl;

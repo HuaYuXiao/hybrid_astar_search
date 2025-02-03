@@ -2,7 +2,7 @@
 
 using namespace std;
 
-namespace Global_Planning{
+namespace hybrid_astar_search{
 // 初始化函数
 void Occupy_map::init(ros::NodeHandle& nh){
     // 地图原点
@@ -10,13 +10,13 @@ void Occupy_map::init(ros::NodeHandle& nh){
     nh.param("map/origin_y", origin_(1), -5.0);
     nh.param("map/origin_z", origin_(2), 0.0);
     // 地图实际尺寸，单位：米
-    nh.param("map/map_size_x", map_size_3d_(0), 16.0);
-    nh.param("map/map_size_y", map_size_3d_(1), 10.0);
-    nh.param("map/map_size_z", map_size_3d_(2), 3.0);
+    nh.param("grid_map/map_size_x", map_size_3d_(0), 16.0);
+    nh.param("grid_map/map_size_y", map_size_3d_(1), 10.0);
+    nh.param("grid_map/map_size_z", map_size_3d_(2), 3.0);
     // 地图分辨率，单位：米
-    nh.param("map/resolution", resolution_,  0.05);
+    nh.param("grid_map/resolution", resolution_,  0.05);
     // 地图膨胀距离，单位：米
-    nh.param("map/inflate", inflate_,  0.35);
+    nh.param("grid_map/obstacles_inflation", inflate_,  0.35);
 
     // 发布 地图rviz显示
     global_pcl_pub = nh.advertise<sensor_msgs::PointCloud2>

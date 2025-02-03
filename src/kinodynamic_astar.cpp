@@ -1,32 +1,28 @@
-#include <kinodynamic_astar.h>
+#include "kinodynamic_astar.h"
 #include <sstream>
 
 using namespace std;
 using namespace Eigen;
 
-namespace Global_Planning
-{
-KinodynamicAstar::~KinodynamicAstar()
-{
-  for (int i = 0; i < max_search_num; i++)
-  {
+namespace hybrid_astar_search{
+KinodynamicAstar::~KinodynamicAstar(){
+  for (int i = 0; i < max_search_num; i++){
     // delete表示释放堆内存
     delete path_node_pool_[i];
   }
 }
 
-void KinodynamicAstar::init(ros::NodeHandle& nh)
-{
+void KinodynamicAstar::init(ros::NodeHandle& nh){
   // 地图参数
-  nh.param("map/resolution", resolution_, 0.05);  // 地图分辨率
+  nh.param("grid_map/resolution", resolution_, 0.05);  // 地图分辨率
 
   // 规划搜索相关参数
   nh.param("kinodynamic_astar/lambda_heu", lambda_heu_, 2.0);  // 加速引导参数
   nh.param("kinodynamic_astar/allocate_num", max_search_num, 100000); //最大搜索节点数
   nh.param("kinodynamic_astar/max_tau", max_tau_, -1.0);
   nh.param("kinodynamic_astar/init_max_tau", init_max_tau_, -1.0);
-  nh.param("kinodynamic_astar/max_vel", max_vel_, -1.0);
-  nh.param("kinodynamic_astar/max_acc", max_acc_, -1.0);
+  nh.param("manager/max_vel", max_vel_, -1.0);
+  nh.param("manager/max_acc", max_acc_, -1.0);
   nh.param("kinodynamic_astar/w_time", w_time_, -1.0);
   nh.param("kinodynamic_astar/horizon", horizon_, -1.0);
   
@@ -44,8 +40,7 @@ void KinodynamicAstar::init(ros::NodeHandle& nh)
   has_global_point = false;
   path_node_pool_.resize(max_search_num);
 
-  for (int i = 0; i < max_search_num; i++)
-  {
+  for (int i = 0; i < max_search_num; i++){
     path_node_pool_[i] = new PathNode;
   }
 
@@ -219,8 +214,7 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
     /* ---------- state propagation loop ---------- */
     // cout << "cur state:" << cur_state.head(3).transpose() << endl;
     for (int i = 0; i < inputs.size(); ++i)
-      for (int j = 0; j < durations.size(); ++j)
-      {
+      for (int j = 0; j < durations.size(); ++j){
         init_search = false;
         um = inputs[i];
         double tau = durations[j];
@@ -231,11 +225,7 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
 
         /* inside map range */
         if (pro_state(0) <= origin_(0) || pro_state(0) >= map_size_3d_(0) || pro_state(1) <= origin_(1) ||
-            pro_state(1) >= map_size_3d_(1) || pro_state(2) <= origin_(2) || pro_state(2) >= map_size_3d_(2))
-        {
-#ifdef DEBUG
-              cout << "outside map" << endl;
-#endif   
+            pro_state(1) >= map_size_3d_(1) || pro_state(2) <= origin_(2) || pro_state(2) >= map_size_3d_(2)){
           continue;
         }
 
@@ -245,16 +235,14 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
 
         PathNodePtr pro_node = dynamic ? expanded_nodes_.find(pro_id, pro_t_id) : expanded_nodes_.find(pro_id);
 
-        if (pro_node != NULL && pro_node->node_state == IN_CLOSE_SET)
-        {
+        if (pro_node != NULL && pro_node->node_state == IN_CLOSE_SET){
           // cout << "in closeset" << endl;
           continue;
         }
 
         /* vel feasibe */
         Eigen::Vector3d pro_v = pro_state.tail(3);
-        if (fabs(pro_v(0)) > max_vel_ || fabs(pro_v(1)) > max_vel_ || fabs(pro_v(2)) > max_vel_)
-        {
+        if (fabs(pro_v(0)) > max_vel_ || fabs(pro_v(1)) > max_vel_ || fabs(pro_v(2)) > max_vel_){
           // cout << "vel infeasible" << endl;
           continue;
         }
@@ -262,8 +250,7 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
         /* not in the same voxel */
         Eigen::Vector3i diff = pro_id - cur_node->index;
         int diff_time = pro_t_id - cur_node->time_idx;
-        if (diff.norm() == 0 && ((!dynamic) || diff_time == 0))
-        {
+        if (diff.norm() == 0 && ((!dynamic) || diff_time == 0)){
           continue;
         }
 
@@ -272,8 +259,7 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
         Eigen::Matrix<double, 6, 1> xt;
         bool is_occ = false;
 
-        for (int k = 1; k <= check_num_; ++k)
-        {
+        for (int k = 1; k <= check_num_; ++k){
           double dt = tau * double(k) / double(check_num_);
           stateTransit(cur_state, xt, um, dt);
           pos = xt.head(3);
@@ -284,12 +270,7 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
           }
         }
 
-        if (is_occ)
-        {
-#ifdef DEBUG
-          printf("A star pos: [%f,  %f,  %f]\n", pos(0), pos(1), pos(2));
-          cout << "collision" << endl;
-#endif      
+        if (is_occ){  
           continue;
         }
 
@@ -301,14 +282,11 @@ int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, 
         /* ---------- compare expanded node in this loop ---------- */
 
         bool prune = false;
-        for (int j = 0; j < tmp_expand_nodes.size(); ++j)
-        {
+        for (int j = 0; j < tmp_expand_nodes.size(); ++j){
           PathNodePtr expand_node = tmp_expand_nodes[j];
-          if ((pro_id - expand_node->index).norm() == 0 && ((!dynamic) || pro_t_id == expand_node->time_idx))
-          {
+          if ((pro_id - expand_node->index).norm() == 0 && ((!dynamic) || pro_t_id == expand_node->time_idx)){
             prune = true;
-            if (tmp_f_score < expand_node->f_score)
-            {
+            if (tmp_f_score < expand_node->f_score){
               expand_node->f_score = tmp_f_score;
               expand_node->g_score = tmp_g_score;
               expand_node->state = pro_state;

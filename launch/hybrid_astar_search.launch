@@ -1,21 +1,16 @@
-<!-- ego_planner 仿真 -->
+<!-- hybrid_astar_search 仿真 -->
 <launch>
-    <!-- 启动全局规划算法 -->
-    <arg name="topic_of_global_pcl" default="/octomap_point_cloud_centers"/>
-
-    <node pkg="hybrid_astar_planner" type="hybrid_astar" name="hybrid_astar" output="screen" launch-prefix="gnome-terminal --">
-        <remap from="/prometheus/global_planning/global_pcl" to="$(arg topic_of_global_pcl)" />
-
+    <node pkg="hybrid_astar_search" type="hybrid_astar_search" name="hybrid_astar_search" output="screen" launch-prefix="gnome-terminal --">
         <!-- 参数 -->
         <!-- 停止距离 -->
         <param name="global_planner/safe_distance" value="0.01" type="double"/>
         <param name="global_planner/time_per_path" value="0.5" type="double"/>
-        <param name="global_planner/replan_time" value="2.0" type="double"/>
+        <param name="fsm/thresh_replan" value="1.5" type="double"/>
 
         <param name="kinodynamic_astar/max_tau" value="0.5" type="double"/>
         <param name="kinodynamic_astar/init_max_tau" value="0.5" type="double"/>
-        <param name="kinodynamic_astar/max_vel" value="1.0" type="double"/>
-        <param name="kinodynamic_astar/max_acc" value="1.0" type="double"/>
+        <param name="manager/max_vel" value="1.0" type="double"/>
+        <param name="manager/max_acc" value="1.0" type="double"/>
         <param name="kinodynamic_astar/w_time" value="15.0" type="double"/>
         <param name="kinodynamic_astar/horizon" value="9.0" type="double"/>
         <param name="kinodynamic_astar/lambda_heu" value="2.0" type="double"/>
@@ -25,15 +20,15 @@
         <param name="kinodynamic_astar/check_num" value="5" type="int"/>
 
         <!-- 分辨率 -->
-        <param name="map/resolution" value="0.2" type="double"/>
+        <param name="grid_map/resolution" value="0.05" type="double"/>
         <!-- 障碍物膨胀距离 -->
-        <param name="map/inflate" value="0.35" type="double"/>
+        <param name="grid_map/obstacles_inflation" value="0.35" type="double"/>
         <!-- 地图范围 -->
         <param name="map/origin_x" value="-8.0" type="double"/>
         <param name="map/origin_y" value="-5.0" type="double"/>
         <param name="map/origin_z" value="0.0" type="double"/>
-        <param name="map/map_size_x" value="16.0" type="double"/>
-        <param name="map/map_size_y" value="10.0" type="double"/>
-        <param name="map/map_size_z" value="3.0" type="double"/>
+        <param name="grid_map/map_size_x" value="16.0" type="double"/>
+        <param name="grid_map/map_size_y" value="10.0" type="double"/>
+        <param name="grid_map/map_size_z" value="3.0" type="double"/>
     </node>
 </launch>

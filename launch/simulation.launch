@@ -1,0 +1,21 @@
+<launch>
+    <include file="$(find easondrone_gazebo)/launch/mavros_posix_sitl.launch">
+        <arg name="world" default="$(find easondrone_gazebo)/worlds/competition/cuadc2024.world"/>
+        <arg name="sdf" default="$(find easondrone_gazebo)/models/drone/iris_d435i_mid360/iris_d435i_mid360.sdf"/>
+        <arg name="gui" default="false"/>
+    </include>
+
+    <node name="filter_pc" type="filter_pc" pkg="easondrone_mapping"/>
+
+    <include file="$(find easondrone_gazebo)/launch/transform.launch"/>
+
+    <include file="$(find px4ctrl)/launch/px4ctrl.launch"/>
+
+    <node type="odom_visualization" pkg="odom_visualization" name="odom_visualization"/>
+
+    <!-- 启动导航 -->
+    <include file="$(find hybrid_astar_search)/launch/hybrid_astar_search.launch"/>
+
+    <!-- 启动rviz -->
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find hybrid_astar_search)/config/hybrid_astar_search.rviz"/>
+</launch>

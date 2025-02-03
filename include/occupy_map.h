@@ -18,7 +18,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <map>
 
-namespace Global_Planning{
+namespace hybrid_astar_search{
 class Occupy_map{
     public:
         Occupy_map(){}
@@ -47,7 +47,6 @@ class Occupy_map{
         double resolution_, inv_resolution_;
         // 膨胀参数
         double inflate_;
-        bool debug_mode;
         // 地图原点,地图尺寸
         Eigen::Vector3d origin_, map_size_3d_, min_range_, max_range_;
         // 占据图尺寸 = 地图尺寸 / 分辨率
