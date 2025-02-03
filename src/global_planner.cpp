@@ -7,31 +7,11 @@ void Global_Planner::init(ros::NodeHandle& nh){
     nh.param("global_planner/safe_distance", safe_distance, 0.05); 
     nh.param("global_planner/time_per_path", time_per_path, 1.0); 
     // 重规划频率 
-    nh.param("global_planner/replan_time", replan_time, 2.0); 
-    // 选择地图更新方式：　0代表全局点云，１代表局部点云，２代表激光雷达scan数据
-    nh.param("global_planner/map_input", map_input, 0); 
+    nh.param("global_planner/replan_time", replan_time, 2.0);
     // 是否为仿真模式
     nh.param("global_planner/sim_mode", sim_mode, true);
 
     nh.param("global_planner/map_groundtruth", map_groundtruth, false); 
-
-    // 订阅 目标点
-    goal_sub = nh.subscribe<geometry_msgs::PoseStamped>("/prometheus/planning/goal", 1, &Global_Planner::goal_cb, this);
-    // 订阅 无人机状态
-    drone_state_sub = nh.subscribe<prometheus_msgs::DroneState>("/prometheus/drone_state", 10, &Global_Planner::drone_state_cb, this);
-    // 根据map_input选择地图更新方式
-    if(map_input == 0){
-        Gpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>("/prometheus/global_planning/global_pcl", 10, &Global_Planner::Gpointcloud_cb, this);
-    }else if(map_input == 1){
-        Lpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>("/prometheus/global_planning/local_pcl", 1, &Global_Planner::Lpointcloud_cb, this);
-    }else if(map_input == 2){
-        laserscan_sub = nh.subscribe<sensor_msgs::LaserScan>("/prometheus/global_planning/laser_scan", 1, &Global_Planner::laser_cb, this);
-    }
-
-    // 发布 路径指令
-    command_pub = nh.advertise<prometheus_msgs::ControlCommand>("/prometheus/control_command", 10);
-    // 发布路径用于显示
-    path_cmd_pub   = nh.advertise<nav_msgs::Path>("/prometheus/global_planning/path_cmd",  10);
 
     // 定时器 安全检测
     // safety_timer = nh.createTimer(ros::Duration(2.0), &Global_Planner::safety_cb, this); 
@@ -41,8 +21,20 @@ void Global_Planner::init(ros::NodeHandle& nh){
     // time_per_path
     track_path_timer = nh.createTimer(ros::Duration(0.2), &Global_Planner::track_path_cb, this);
 
+    // 订阅 目标点
+    goal_sub = nh.subscribe<geometry_msgs::PoseStamped>("/prometheus/planning/goal", 1, &Global_Planner::goal_cb, this);
+    // 订阅 无人机状态
+    drone_state_sub = nh.subscribe<prometheus_msgs::DroneState>("/prometheus/drone_state", 10, &Global_Planner::drone_state_cb, this);
+    // 地图更新
+    Gpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>("/prometheus/global_planning/global_pcl", 10, &Global_Planner::Gpointcloud_cb, this);
+
+    // 发布 路径指令
+    command_pub = nh.advertise<prometheus_msgs::ControlCommand>("/prometheus/control_command", 10);
+    // 发布路径用于显示
+    path_cmd_pub   = nh.advertise<nav_msgs::Path>("/prometheus/global_planning/path_cmd",  10);
+
     // 设置cout的精度为小数点后两位
-    std::cout << std::fixed << std::setprecision(2);
+    std::cout << std::fixed << std::setprecision(4);
 
     cout << "[planner] Hybrid Astar Planner initialized!" << endl;
 
@@ -64,7 +56,7 @@ void Global_Planner::init(ros::NodeHandle& nh){
 }
 
 void Global_Planner::goal_cb(const geometry_msgs::PoseStampedConstPtr& msg){
-        goal_pos << msg->pose.position.x, msg->pose.position.y, _DroneState.position[2];
+    goal_pos << msg->pose.position.x, msg->pose.position.y, _DroneState.position[2];
         
     goal_vel.setZero();
 
@@ -99,36 +91,14 @@ void Global_Planner::Gpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg)
         Astar_ptr->Occupy_map_ptr->inflate_point_cloud();
 }
 
-// 根据局部点云更新地图
-// 情况：RGBD相机、三维激光雷达
-void Global_Planner::Lpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg){
-    // 对Astar中的地图进行更新（局部地图+odom）
-    Astar_ptr->Occupy_map_ptr->map_update_lpcl(msg, Drone_odom);
-    // 并对地图进行膨胀
-    Astar_ptr->Occupy_map_ptr->inflate_point_cloud(); 
-}
-
-// 根据2维雷达数据更新地图
-// 情况：2维激光雷达
-void Global_Planner::laser_cb(const sensor_msgs::LaserScanConstPtr &msg){
-    // 对Astar中的地图进行更新（laser+odom）
-    Astar_ptr->Occupy_map_ptr->map_update_laser(msg, Drone_odom);
-    // 并对地图进行膨胀
-    Astar_ptr->Occupy_map_ptr->inflate_point_cloud(); 
-}
-
-void Global_Planner::track_path_cb(const ros::TimerEvent& e)
-{
-    if(!path_ok)
-    {
+void Global_Planner::track_path_cb(const ros::TimerEvent& e){
+    if(!path_ok){
         return;
     }
 
-    // if(!is_safety)
-    // {
+    // if(!is_safety){
     //     // 若无人机与障碍物之间的距离小于安全距离，则停止执行路径
     //     // 但如何脱离该点呢？
-    //     pub_message(message_pub, prometheus_msgs::Message::WARN, NODE_NAME, "Drone Position Dangerous! STOP HERE and wait for new goal.");
 
     //     goal_ready = false;
     //     exec_state = EXEC_STATE::WAIT_GOAL;
