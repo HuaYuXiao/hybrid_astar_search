@@ -35,7 +35,6 @@ private:
     ros::NodeHandle global_planner_nh;
 
     // 参数
-    int algorithm_mode;
     double safe_distance;
     double time_per_path;
     int map_input;

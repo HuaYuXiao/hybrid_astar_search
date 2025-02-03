@@ -3,9 +3,6 @@
 namespace Global_Planning{
 // 初始化函数
 void Global_Planner::init(ros::NodeHandle& nh){
-    // 读取参数
-    // 选择算法，　0 代表A_star; 1 代表混合A_star
-    nh.param("global_planner/algorithm_mode", algorithm_mode, 1);
     // 安全距离，若膨胀距离设置已考虑安全距离，建议此处设为0
     nh.param("global_planner/safe_distance", safe_distance, 0.05); 
     nh.param("global_planner/time_per_path", time_per_path, 1.0); 
