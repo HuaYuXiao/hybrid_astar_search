@@ -14,11 +14,9 @@
 #include <nav_msgs/Path.h>
 #include "prometheus_msgs/PositionReference.h"
 #include "prometheus_msgs/Message.h"
-#include "prometheus_msgs/DroneState.h"
 #include "prometheus_msgs/ControlCommand.h"
 #include "kinodynamic_astar.h"
 #include "occupy_map.h"
-#include "message_utils.h"
 
 using namespace std;
 
@@ -28,6 +26,14 @@ namespace Global_Planning{
 class Global_Planner{
 private:
     ros::NodeHandle global_planner_nh;
+
+    // odometry state
+    ros::Subscriber odom_sub_;
+    bool have_odom_;
+    // TODO: change to odom lost check
+    ros::Time last_odom_stamp_;
+    Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_;
+    double odom_roll_, odom_pitch_, odom_yaw_;
 
     // 参数
     double safe_distance;
@@ -42,7 +48,6 @@ private:
 
     // 订阅无人机状态、目标点、传感器数据（生成地图）
     ros::Subscriber goal_sub;
-    ros::Subscriber drone_state_sub;
     // 支持直接输入全局已知点云
     ros::Subscriber Gpointcloud_sub;
 
@@ -52,9 +57,6 @@ private:
 
     // A星规划器
     KinodynamicAstar::Ptr Astar_ptr;
-
-    prometheus_msgs::DroneState _DroneState;
-    nav_msgs::Odometry Drone_odom;
 
     nav_msgs::Path path_cmd;
     double distance_walked;
@@ -73,7 +75,6 @@ private:
 
     // 规划初始状态及终端状态
     Eigen::Vector3d start_pos, start_vel, start_acc, goal_pos, goal_vel;
-
     float desired_yaw;
 
     ros::Time tra_start_time;
@@ -89,6 +90,7 @@ private:
     EXEC_STATE exec_state;
 
     // 回调函数
+    void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
     void goal_cb(const geometry_msgs::PoseStampedConstPtr& msg);
     void drone_state_cb(const prometheus_msgs::DroneStateConstPtr &msg);
     void Gpointcloud_cb(const sensor_msgs::PointCloud2ConstPtr &msg);
@@ -103,8 +105,8 @@ private:
     int get_start_point_id(void);
     
 public:
-    Global_Planner(void): global_planner_nh("~")
-    {}~Global_Planner(){}
+    Global_Planner(void): global_planner_nh("~"){}
+    ~Global_Planner(){}
 
     void init(ros::NodeHandle& nh);
 };

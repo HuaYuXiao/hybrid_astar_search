@@ -18,12 +18,14 @@ void Global_Planner::init(ros::NodeHandle& nh){
     // time_per_path
     track_path_timer = nh.createTimer(ros::Duration(0.2), &Global_Planner::track_path_cb, this);
 
+    odom_sub_ = nh.subscribe<nav_msgs::Odometry>
+                ("/mavros/local_position/odom", 10, &Local_Planner::odometryCallback, this);
     // 订阅 目标点
-    goal_sub = nh.subscribe<geometry_msgs::PoseStamped>("/prometheus/planning/goal", 1, &Global_Planner::goal_cb, this);
-    // 订阅 无人机状态
-    drone_state_sub = nh.subscribe<prometheus_msgs::DroneState>("/prometheus/drone_state", 10, &Global_Planner::drone_state_cb, this);
+    goal_sub = nh.subscribe<geometry_msgs::PoseStamped>
+            ("/prometheus/planning/goal", 1, &Global_Planner::goal_cb, this);
     // 地图更新
-    Gpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>("/prometheus/global_planning/global_pcl", 10, &Global_Planner::Gpointcloud_cb, this);
+    Gpointcloud_sub = nh.subscribe<sensor_msgs::PointCloud2>
+            ("/prometheus/global_planning/global_pcl", 10, &Global_Planner::Gpointcloud_cb, this);
 
     // 发布 路径指令
     command_pub = nh.advertise<prometheus_msgs::ControlCommand>("/prometheus/control_command", 10);
@@ -52,31 +54,49 @@ void Global_Planner::init(ros::NodeHandle& nh){
     desired_yaw = 0.0;
 }
 
+// 保存无人机当前里程计信息，包括位置、速度和姿态
+void Global_Planner::odometryCallback(const nav_msgs::Odometry::ConstPtr& msg){
+    // TODO: add odom lost check
+    have_odom_ = true;
+    last_odom_stamp_ = ros::Time::now();
+
+    odom_pos_ << msg->pose.pose.position.x,
+            msg->pose.pose.position.y,
+            msg->pose.pose.position.z;
+    start_pos = odom_pos_;
+
+    odom_vel_ << msg->twist.twist.linear.x,
+            msg->twist.twist.linear.y,
+            msg->twist.twist.linear.z;
+    start_vel = odom_vel_;
+
+    //odom_acc_ = estimateAcc( msg );
+    start_acc.setZero();
+
+    // 将四元数转换至(roll,pitch,yaw)  by a 3-2-1 intrinsic Tait-Bryan rotation sequence
+    // https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+    tf::Quaternion odom_q_(
+            msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y,
+            msg->pose.pose.orientation.z,
+            msg->pose.pose.orientation.w
+    );
+
+    tf::Matrix3x3(odom_q_).getRPY(odom_roll_, odom_pitch_, odom_yaw_);
+
+    if (local_alg_ptr) {
+        local_alg_ptr->set_odom(*msg);
+    } else {
+        ROS_ERROR("local_alg_ptr is nullptr");
+    }
+}
+
 void Global_Planner::goal_cb(const geometry_msgs::PoseStampedConstPtr& msg){
-    goal_pos << msg->pose.position.x, msg->pose.position.y, _DroneState.position[2];
-        
+    goal_pos << msg->pose.position.x, msg->pose.position.y, odom_pos_[2];
+    
     goal_vel.setZero();
 
     goal_ready = true;
-}
-
-void Global_Planner::drone_state_cb(const prometheus_msgs::DroneStateConstPtr& msg){
-    _DroneState = *msg;
-
-        start_pos << msg->position[0], msg->position[1], msg->position[2];
-        start_vel << msg->velocity[0], msg->velocity[1], msg->velocity[2];
-
-    start_acc.setZero();
-
-    Drone_odom.header = _DroneState.header;
-    Drone_odom.child_frame_id = "base_link";
-    Drone_odom.pose.pose.position.x = _DroneState.position[0];
-    Drone_odom.pose.pose.position.y = _DroneState.position[1];
-    Drone_odom.pose.pose.position.z = _DroneState.position[2];
-    Drone_odom.pose.pose.orientation = _DroneState.attitude_q;
-    Drone_odom.twist.twist.linear.x = _DroneState.velocity[0];
-    Drone_odom.twist.twist.linear.y = _DroneState.velocity[1];
-    Drone_odom.twist.twist.linear.z = _DroneState.velocity[2];
 }
 
 // 根据全局点云更新地图
@@ -139,7 +159,7 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
     // 采用轨迹控制的方式进行追踪，期望速度 = （期望位置 - 当前位置）/预计时间；
 
     const float limit_velocity_x = 0.2;
-    float velocity_x = (path_cmd.poses[i].pose.position.x - _DroneState.position[0])/time_per_path;
+    float velocity_x = (path_cmd.poses[i].pose.position.x - odom_pos_[0])/time_per_path;
     if(velocity_x < -limit_velocity_x){
         velocity_x = -limit_velocity_x;
     }else if(velocity_x > limit_velocity_x){
@@ -147,7 +167,7 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
     }
 
     const float limit_velocity_y = 0.2;
-    float velocity_y = (path_cmd.poses[i].pose.position.y - _DroneState.position[1])/time_per_path;
+    float velocity_y = (path_cmd.poses[i].pose.position.y - odom_pos_[1])/time_per_path;
     if(velocity_y < -limit_velocity_y){
         velocity_y = -limit_velocity_y;
     }else if(velocity_y > limit_velocity_y){
@@ -155,7 +175,7 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
     }
 
     const float limit_velocity_z = 0.1;
-    float velocity_z = (path_cmd.poses[i].pose.position.z - _DroneState.position[2])/time_per_path;
+    float velocity_z = (path_cmd.poses[i].pose.position.z - odom_pos_[2])/time_per_path;
     if(velocity_z < -limit_velocity_z){
         velocity_z = -limit_velocity_z;
     }else if(velocity_z > limit_velocity_z){
@@ -245,7 +265,7 @@ float Global_Planner::get_time_in_sec(const ros::Time& begin_time){
 }
 
 void Global_Planner::safety_cb(const ros::TimerEvent& e){
-    Eigen::Vector3d cur_pos(_DroneState.position[0], _DroneState.position[1], _DroneState.position[2]);
+    Eigen::Vector3d cur_pos(odom_pos_[0], odom_pos_[1], odom_pos_[2]);
     
     is_safety = Astar_ptr->check_safety(cur_pos, safe_distance);
 }
@@ -253,16 +273,16 @@ void Global_Planner::safety_cb(const ros::TimerEvent& e){
 int Global_Planner::get_start_point_id(void){
     // 选择与当前无人机所在位置最近的点,并从该点开始追踪
     int id = 0;
-    float distance_to_wp_min = abs(path_cmd.poses[0].pose.position.x - _DroneState.position[0])
-                                + abs(path_cmd.poses[0].pose.position.y - _DroneState.position[1])
-                                + abs(path_cmd.poses[0].pose.position.z - _DroneState.position[2]);
+    float distance_to_wp_min = abs(path_cmd.poses[0].pose.position.x - odom_pos_[0])
+                                + abs(path_cmd.poses[0].pose.position.y - odom_pos_[1])
+                                + abs(path_cmd.poses[0].pose.position.z - odom_pos_[2]);
     
     float distance_to_wp;
 
     for (int j=1; j<Num_total_wp;j++){
-        distance_to_wp = abs(path_cmd.poses[j].pose.position.x - _DroneState.position[0])
-                                + abs(path_cmd.poses[j].pose.position.y - _DroneState.position[1])
-                                + abs(path_cmd.poses[j].pose.position.z - _DroneState.position[2]);
+        distance_to_wp = abs(path_cmd.poses[j].pose.position.x - odom_pos_[0])
+                                + abs(path_cmd.poses[j].pose.position.y - odom_pos_[1])
+                                + abs(path_cmd.poses[j].pose.position.z - odom_pos_[2]);
         
         if(distance_to_wp < distance_to_wp_min){
             distance_to_wp_min = distance_to_wp;
