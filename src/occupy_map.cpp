@@ -1,10 +1,10 @@
 #include <occupy_map.h>
 
-namespace Global_Planning
-{
+using namespace std;
+
+namespace Global_Planning{
 // 初始化函数
-void Occupy_map::init(ros::NodeHandle& nh)
-{
+void Occupy_map::init(ros::NodeHandle& nh){
     // 地图原点
     nh.param("map/origin_x", origin_(0), -8.0);
     nh.param("map/origin_y", origin_(1), -5.0);
@@ -19,16 +19,29 @@ void Occupy_map::init(ros::NodeHandle& nh)
     nh.param("map/inflate", inflate_,  0.35);
 
     // 发布 地图rviz显示
-    global_pcl_pub = nh.advertise<sensor_msgs::PointCloud2>("/prometheus/planning/global_pcl",  10); 
+    global_pcl_pub = nh.advertise<sensor_msgs::PointCloud2>
+            ("/hybrid_astar_search/global_pcl",  10); 
     // 发布膨胀后的点云
-    inflate_pcl_pub = nh.advertise<sensor_msgs::PointCloud2>("/prometheus/planning/global_inflate_pcl", 1);
+    inflate_pcl_pub = nh.advertise<sensor_msgs::PointCloud2>
+            ("/hybrid_astar_search/global_inflate_pcl", 1);
  
+    // 全局地图点云指针（环境）
+    global_point_cloud_map.reset(new pcl::PointCloud<pcl::PointXYZ>);
+    // 传入点云指针（临时指针）
+    input_point_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>);
+    // tf变换后点云指针（临时指针）
+    transformed_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>);
+
+    // 局部地图滑窗指示器
+    st_it = 0;
+    // 存储的上一帧odom
+    f_x = f_y = f_z = f_pitch = f_yaw = f_roll = 0.0;
+
     // 发布二维占据图？
     // 发布膨胀后的二维占据图？
 
     this->inv_resolution_ = 1.0 / resolution_;
-    for (int i = 0; i < 3; ++i)
-    {
+    for (int i = 0; i < 3; ++i){
         // 占据图尺寸 = 地图尺寸 / 分辨率
         grid_size_(i) = ceil(map_size_3d_(i) / resolution_);
     }
@@ -41,35 +54,69 @@ void Occupy_map::init(ros::NodeHandle& nh)
     max_range_ = origin_ + map_size_3d_;
 }
 
-// 地图更新函数 - 输入：全局点云
-void Occupy_map::map_update_gpcl(const sensor_msgs::PointCloud2ConstPtr & global_point)
-{
-    has_global_point = true;
-    global_env_ = global_point;
-}
-
 // 地图更新函数 - 输入：局部点云
-void Occupy_map::map_update_lpcl(const sensor_msgs::PointCloud2ConstPtr & local_point, const nav_msgs::Odometry & odom)
-{
-    has_global_point = true;
-// 待江涛更新
-// 将传递过来的局部点云转为全局点云
-}
+void Occupy_map::map_update_lpcl(const sensor_msgs::PointCloud2ConstPtr &local_point, 
+                                const Eigen::Vector3d odom_pos_,
+                                const double odom_roll_, 
+                                const double odom_pitch_, 
+                                const double odom_yaw_){
+    // 由sensor_msgs::PointCloud2 转为 pcl::PointCloud<pcl::PointXYZ>
+    pcl::fromROSMsg(*local_point, *input_point_cloud);
 
-// 地图更新函数 - 输入：laser
-void Occupy_map::map_update_laser(const sensor_msgs::LaserScanConstPtr & local_point, const nav_msgs::Odometry & odom)
-{
-    has_global_point = true;
-// 待更新
-// 将传递过来的数据转为全局点云
+    // uav is moving
+    bool pos_change = (abs(odom_pos_[0] - f_x) > 0.1) || (abs(odom_pos_[1] - f_y) > 0.1);
+    // update map even though uav doesn't move
+    static int update_num = 0;
+    update_num++;
+
+    // merge local points to local map
+    if (pos_change || global_point_cloud_map == nullptr || update_num > 1){
+        update_num = 0;
+
+        // accumulate pointcloud according to odom
+        pcl::transformPointCloud(*input_point_cloud, *transformed_cloud, pcl::getTransformation(odom_pos_[0], 
+                                                                                                odom_pos_[1], 
+                                                                                                odom_pos_[2], 
+                                                                                                odom_roll_, 
+                                                                                                odom_pitch_, 
+                                                                                                odom_yaw_));
+        // without slide windows
+        if (queue_size <= 0){
+            *transformed_cloud += *global_point_cloud_map;
+        }
+        // with slide windows
+        else{
+            // slide windows with size: $queue_size
+            point_cloud_pair[st_it] = *transformed_cloud; // 加入新点云到滑窗
+            st_it = (st_it + 1) % queue_size;             // 指向下一个移除的点云位置
+
+            // 累计局部地图：需要20个加法，O（1）内存；增量式：需要19个加法，O（1.5）内存
+            transformed_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>);
+            map<int, pcl::PointCloud<pcl::PointXYZ>>::iterator iter;
+            for (iter = point_cloud_pair.begin(); iter != point_cloud_pair.end(); iter++){
+                *transformed_cloud += iter->second;
+            }
+        }
+
+        // downsample
+        vg.setInputCloud(transformed_cloud);
+        vg.setLeafSize(0.2f, 0.2f, 0.2f); // 下采样叶子节点大小（3D容器）
+        vg.filter(*global_point_cloud_map);
+
+        // store last odom data
+        f_x = odom_pos_[0];
+        f_y = odom_pos_[1];
+        f_z = odom_pos_[2];
+        f_roll = odom_roll_;
+        f_pitch = odom_pitch_;
+        f_yaw = odom_yaw_;
+    }
 }
 
 // 当global_planning节点接收到点云消息更新时，进行设置点云指针并膨胀
 // Astar规划路径时，采用的是此处膨胀后的点云（setOccupancy只在本函数中使用）
-void Occupy_map::inflate_point_cloud(void)
-{
-    if(!has_global_point)
-    { 
+void Occupy_map::inflate_point_cloud(void){
+    if(!has_global_point){
         cout << "Occupy_map [inflate point cloud]: don't have global point, can't inflate!" << endl;
         return;
     }
@@ -95,8 +142,7 @@ void Occupy_map::inflate_point_cloud(void)
     Eigen::Vector3d p3d, p3d_inf;
 
     // 遍历全局点云中的所有点
-    for (size_t i = 0; i < latest_global_cloud_.points.size(); ++i) 
-    {
+    for (size_t i = 0; i < latest_global_cloud_.points.size(); ++i) {
         // 取出第i个点
         p3d(0) = latest_global_cloud_.points[i].x;
         p3d(1) = latest_global_cloud_.points[i].y;
@@ -140,16 +186,13 @@ void Occupy_map::inflate_point_cloud(void)
     inflate_pcl_pub.publish(map_inflate_vis);
 }
 
-void Occupy_map::setOccupancy(Eigen::Vector3d pos, int occ) 
-{
-    if (occ != 1 && occ != 0) 
-    {
+void Occupy_map::setOccupancy(Eigen::Vector3d pos, int occ) {
+    if (occ != 1 && occ != 0) {
         cout << "occ value error!" << endl;
         return;
     }
 
-    if (!isInMap(pos))
-    {
+    if (!isInMap(pos)){
         return;
     }
 
@@ -163,28 +206,23 @@ void Occupy_map::setOccupancy(Eigen::Vector3d pos, int occ)
     occupancy_buffer_[id(0) * grid_size_(1) * grid_size_(2) + id(1) * grid_size_(2) + id(2)] = occ;
 }
 
-bool Occupy_map::isInMap(Eigen::Vector3d pos) 
-{
+bool Occupy_map::isInMap(Eigen::Vector3d pos) {
     // min_range就是原点，max_range就是原点+地图尺寸
     // 比如设置0,0,0为原点，[0,0,0]点会被判断为不在地图里
     //　同时　对于２Ｄ情况，超出飞行高度的数据也会认为不在地图内部
-    if (pos(0) < min_range_(0) + 1e-4 || pos(1) < min_range_(1) + 1e-4 || pos(2) < min_range_(2) + 1e-4) 
-    {
+    if (pos(0) < min_range_(0) + 1e-4 || pos(1) < min_range_(1) + 1e-4 || pos(2) < min_range_(2) + 1e-4) {
         return false;
     }
 
-    if (pos(0) > max_range_(0) - 1e-4 || pos(1) > max_range_(1) - 1e-4 || pos(2) > max_range_(2) - 1e-4) 
-    {
+    if (pos(0) > max_range_(0) - 1e-4 || pos(1) > max_range_(1) - 1e-4 || pos(2) > max_range_(2) - 1e-4) {
         return false;
     }
 
     return true;
 }
 
-bool Occupy_map::check_safety(Eigen::Vector3d& pos, double check_distance)
-{
-    if(!isInMap(pos))
-    {
+bool Occupy_map::check_safety(Eigen::Vector3d& pos, double check_distance){
+    if(!isInMap(pos)){
         // 当前位置点不在地图内
         cout << "[check_safety]: the odom point is not in map" << endl;
         return 0;
@@ -206,7 +244,6 @@ bool Occupy_map::check_safety(Eigen::Vector3d& pos, double check_distance)
                 indexToPos(id_occ, pos_occ);
                 if(!isInMap(pos_occ)){
                     // printf("[check_safety]: current odom is near the boundary of the map\n");
-                    // pub_message(message_pub, prometheus_msgs::Message::WARN, NODE_NAME, "[check_safety]: current odom is near the boundary of the map\n");
                     return 0;
                 }
                 if(getOccupancy(id_occ)){
@@ -223,27 +260,21 @@ bool Occupy_map::check_safety(Eigen::Vector3d& pos, double check_distance)
 
 }
 
-void Occupy_map::posToIndex(Eigen::Vector3d pos, Eigen::Vector3i &id) 
-{
-    for (int i = 0; i < 3; ++i)
-    {
+void Occupy_map::posToIndex(Eigen::Vector3d pos, Eigen::Vector3i &id) {
+    for (int i = 0; i < 3; ++i){
         id(i) = floor((pos(i) - origin_(i)) * inv_resolution_);
     }
        
 }
 
-void Occupy_map::indexToPos(Eigen::Vector3i id, Eigen::Vector3d &pos) 
-{
-    for (int i = 0; i < 3; ++i)
-    {
+void Occupy_map::indexToPos(Eigen::Vector3i id, Eigen::Vector3d &pos) {
+    for (int i = 0; i < 3; ++i){
         pos(i) = (id(i) + 0.5) * resolution_ + origin_(i);
     }
 }
 
-int Occupy_map::getOccupancy(Eigen::Vector3d pos) 
-{
-    if (!isInMap(pos))
-    {
+int Occupy_map::getOccupancy(Eigen::Vector3d pos) {
+    if (!isInMap(pos)){
         return -1;
     }
         
@@ -253,11 +284,9 @@ int Occupy_map::getOccupancy(Eigen::Vector3d pos)
     return occupancy_buffer_[id(0) * grid_size_(1) * grid_size_(2) + id(1) * grid_size_(2) + id(2)];
 }
 
-int Occupy_map::getOccupancy(Eigen::Vector3i id) 
-{
+int Occupy_map::getOccupancy(Eigen::Vector3i id) {
     if (id(0) < 0 || id(0) >= grid_size_(0) || id(1) < 0 || id(1) >= grid_size_(1) || id(2) < 0 ||
-        id(2) >= grid_size_(2))
-    {
+        id(2) >= grid_size_(2)){
         return -1;
     }
         

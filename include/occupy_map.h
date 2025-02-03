@@ -14,18 +14,30 @@
 #include <tf/transform_listener.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Odometry.h>
-#include <visualization_msgs/Marker.h>
-#include <sensor_msgs/LaserScan.h>
-#include "message_utils.h"
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/filters/voxel_grid.h>
+#include <map>
 
-#define NODE_NAME "Global_Planner [map]"
-
-namespace Global_Planning
-{
-class Occupy_map
-{
+namespace Global_Planning{
+class Occupy_map{
     public:
         Occupy_map(){}
+
+        // 局部地图 滑窗 存储器
+        std::map<int, pcl::PointCloud<pcl::PointXYZ>> point_cloud_pair;
+        // 全局地图点云指针
+        pcl::PointCloud<pcl::PointXYZ>::Ptr global_point_cloud_map;
+        // 临时指针
+        pcl::PointCloud<pcl::PointXYZ>::Ptr input_point_cloud;
+        pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_cloud;
+
+        // VoxelGrid过滤器用于下采样
+        pcl::VoxelGrid<pcl::PointXYZ> vg;
+
+        // 上一帧odom
+        double f_x, f_y, f_z, f_roll, f_pitch, f_yaw;
+        // 局部地图滑窗，指示器以及大小
+        int st_it, queue_size;
 
         // 全局点云指针
         sensor_msgs::PointCloud2ConstPtr global_env_;
@@ -42,9 +54,6 @@ class Occupy_map
         Eigen::Vector3i grid_size_;
 
         bool has_global_point;
-           
-        // 显示相关
-        void show_gpcl_marker(visualization_msgs::Marker &m, int id, Eigen::Vector4d color);
 
         // 发布点云用于rviz显示
         ros::Publisher global_pcl_pub, inflate_pcl_pub;
@@ -52,11 +61,11 @@ class Occupy_map
         //初始化
         void init(ros::NodeHandle& nh);
         // 地图更新函数 - 输入：全局点云
-        void map_update_gpcl(const sensor_msgs::PointCloud2ConstPtr & global_point);
-        // 地图更新函数 - 输入：局部点云
-        void map_update_lpcl(const sensor_msgs::PointCloud2ConstPtr & local_point, const nav_msgs::Odometry & odom);
-        // 地图更新函数 - 输入：二维激光雷达
-        void map_update_laser(const sensor_msgs::LaserScanConstPtr & local_point, const nav_msgs::Odometry & odom);
+        void map_update_lpcl(const sensor_msgs::PointCloud2ConstPtr &local_point, 
+                            const Eigen::Vector3d odom_pos_,
+                            const double odom_roll_, 
+                            const double odom_pitch_, 
+                            const double odom_yaw_);
         // 地图膨胀
         void inflate_point_cloud(void);
         // 判断当前点是否在地图内
@@ -78,7 +87,4 @@ class Occupy_map
 };
 
 }
-
-
-
 #endif
