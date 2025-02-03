@@ -34,7 +34,6 @@ private:
     double time_per_path;
     double replan_time;
     bool consider_neighbour;
-    bool sim_mode;
     bool map_groundtruth;
 
     // 根据不同的输入（激光雷达输入、相机输入等）生成occupymap

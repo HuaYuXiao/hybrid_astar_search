@@ -8,9 +8,6 @@ void Global_Planner::init(ros::NodeHandle& nh){
     nh.param("global_planner/time_per_path", time_per_path, 1.0); 
     // 重规划频率 
     nh.param("global_planner/replan_time", replan_time, 2.0);
-    // 是否为仿真模式
-    nh.param("global_planner/sim_mode", sim_mode, true);
-
     nh.param("global_planner/map_groundtruth", map_groundtruth, false); 
 
     // 定时器 安全检测
