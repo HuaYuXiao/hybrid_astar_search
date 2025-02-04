@@ -130,7 +130,7 @@ void Global_Planner::track_path_cb(const ros::TimerEvent& e){
     distance_to_goal = (start_pos - goal_pos).norm();
 
     // 抵达终点
-    if(distance_to_goal < MIN_DIS){
+    if(cur_id >= Num_total_wp - 1){
         ctrl_cmd_out_.header.stamp = ros::Time::now();
         ctrl_cmd_out_.mode = easondrone_msgs::ControlCommand::Move;
         ctrl_cmd_out_.frame = easondrone_msgs::ControlCommand::ENU;

@@ -4,7 +4,7 @@
         <!-- 参数 -->
         <!-- 停止距离 -->
         <param name="global_planner/safe_distance" value="0.01" type="double"/>
-        <param name="global_planner/time_per_path" value="0.5" type="double"/>
+        <param name="global_planner/time_per_path" value="0.1" type="double"/>
         <param name="fsm/thresh_replan" value="1.5" type="double"/>
 
         <param name="kinodynamic_astar/max_tau" value="0.5" type="double"/>
